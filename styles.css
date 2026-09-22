@@ -1,0 +1,7 @@
+html.ext-css {
+  filter: invert(1) contrast(.9);
+}
+
+html.ext-css img {
+  filter: invert(1) contrast(1);
+}
