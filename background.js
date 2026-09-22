@@ -1,82 +1,160 @@
-const CSS =
-`:root {
-  filter: invert(1) contrast(.9);
+const STORAGE_KEY = "disabledDomains";
+
+async function isEnabled(domain) {
+  const result = await browser.storage.local.get(STORAGE_KEY);
+  const disabledDomains = result[STORAGE_KEY] || [];
+
+  return !disabledDomains.includes(domain);
 }
 
-img {
-  filter: invert(1) contrast(1);
-}
-`;
-const TITLE_APPLY = "Apply CSS";
-const TITLE_REMOVE = "Remove CSS";
-const APPLICABLE_PROTOCOLS = ["http:", "https:"];
+async function toggleDomain(domain) {
+  const result = await browser.storage.local.get(STORAGE_KEY);
+  const disabledDomains = result[STORAGE_KEY] || [];
 
-/*
-Toggle CSS: based on the current title, insert or remove the CSS.
-Update the page action's title and icon to reflect its state.
-*/
-function toggleCSS(tab) {
-  function gotTitle(title) {
-    if (title === TITLE_APPLY) {
-      browser.pageAction.setIcon({ tabId: tab.id, path: "icons/on.svg" });
-      browser.pageAction.setTitle({ tabId: tab.id, title: TITLE_REMOVE });
-      browser.scripting.insertCSS({
-        target: { tabId: tab.id },
-        css: CSS
-      });
-    } else {
-      browser.pageAction.setIcon({ tabId: tab.id, path: "icons/off.svg" });
-      browser.pageAction.setTitle({ tabId: tab.id, title: TITLE_APPLY });
-      browser.scripting.removeCSS({
-        target: { tabId: tab.id },
-        css: CSS
-      });
+  const currentlyEnabled = !disabledDomains.includes(domain);
+
+  let nextDisabledDomains;
+
+  if (currentlyEnabled) {
+    nextDisabledDomains = [
+      ...disabledDomains,
+      domain
+    ];
+  } else {
+    nextDisabledDomains = disabledDomains.filter(
+      item => item !== domain
+    );
+  }
+
+  await browser.storage.local.set({
+    [STORAGE_KEY]: nextDisabledDomains
+  });
+
+  return !currentlyEnabled;
+}
+
+async function updateAction(tabId, enabled) {
+  await browser.action.setTitle({
+    tabId,
+    title: enabled
+      ? "Theme invert: ON"
+      : "Theme invert: OFF"
+  });
+  
+  await browser.action.setIcon({
+    tabId,
+    path: enabled ? "icons/on.svg" : "icons/off.svg",
+  });
+}
+
+async function updateTabsForDomain(domain, enabled) {
+  const tabs = await browser.tabs.query({});
+
+  await Promise.all(
+    tabs.map(async (tab) => {
+      if (!tab.id || !tab.url) {
+        return;
+      }
+
+      try {
+        const url = new URL(tab.url);
+
+        if (url.hostname !== domain) {
+          return;
+        }
+
+        await browser.tabs.sendMessage(tab.id, {
+          type: "setEnabled",
+          enabled
+        });
+
+        await updateAction(tab.id, enabled);
+      } catch {
+        console.log('Tab not found');
+        
+      }
+    })
+  );
+}
+
+browser.action.onClicked.addListener(async (tab) => {
+  if (!tab.id || !tab.url) {
+    return;
+  }
+
+  let url;
+
+  try {
+    url = new URL(tab.url);
+  } catch {
+    return;
+  }
+
+  if (!url.hostname) {
+    return;
+  }
+
+  const domain = url.hostname;
+  const enabled = await toggleDomain(domain);
+
+  try {
+    await updateTabsForDomain(
+      url.hostname,
+      enabled
+    );
+  } catch {
+    console.log("Content script unavailable.")
+  }
+});
+
+browser.runtime.onMessage.addListener(async (message) => {
+  if (message.type !== "getEnabled") {
+    return;
+  }
+
+  return {
+    enabled: await isEnabled(message.domain)
+  };
+});
+
+browser.tabs.onActivated.addListener(async ({ tabId }) => {
+  try {
+    const tab = await browser.tabs.get(tabId);
+
+    if (!tab.url) {
+      return;
     }
-  }
 
-  let gettingTitle = browser.pageAction.getTitle({ tabId: tab.id });
-  gettingTitle.then(gotTitle);
-}
+    const url = new URL(tab.url);
 
-/*
-Returns true only if the URL's protocol is in APPLICABLE_PROTOCOLS.
-Argument url must be a valid URL string.
-*/
-function protocolIsApplicable(url) {
-  const protocol = (new URL(url)).protocol;
-  return APPLICABLE_PROTOCOLS.includes(protocol);
-}
+    if (!url.hostname) {
+      return;
+    }
 
-/*
-Initialize the page action: set icon and title, then show.
-Only operates on tabs whose URL's protocol is applicable.
-*/
-function initializePageAction(tab) {
-  if (protocolIsApplicable(tab.url)) {
-    browser.pageAction.setIcon({ tabId: tab.id, path: "icons/off.svg" });
-    browser.pageAction.setTitle({ tabId: tab.id, title: TITLE_APPLY });
-    browser.pageAction.show(tab.id);
-  }
-}
+    const enabled = await isEnabled(url.hostname);
 
-/*
-When first loaded, initialize the page action for all tabs.
-*/
-let gettingAllTabs = browser.tabs.query({});
-gettingAllTabs.then((tabs) => {
-  for (let tab of tabs) {
-    initializePageAction(tab);
+    await updateAction(tabId, enabled);
+  } catch {
+    console.log('Tab not found')
   }
 });
 
-/*
-Each time a tab is updated, reset the page action for that tab.
-*/
-browser.tabs.onUpdated.addListener((id, changeInfo, tab) => {
-  initializePageAction(tab);
-});
+browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "loading" || !tab.url) {
+    return;
+  }
 
-/*
-Toggle CSS when the page action is clicked.
-*/
-browser.pageAction.onClicked.addListener(toggleCSS);
+  try {
+    const url = new URL(tab.url);
+
+    if (!url.hostname) {
+      return;
+    }
+
+    const enabled = await isEnabled(url.hostname);
+
+    await updateAction(tabId, enabled);
+  } catch {
+    console.log('Invalid url');
+  }
+});
