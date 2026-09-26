@@ -1,2 +1,4 @@
 # page-theme-invert
-Firefox extension that inverts page colors to ease your eyes
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/heyoboo/page-theme-invert)
+
+A Firefox extension that inverts page colors to ease your eyes
