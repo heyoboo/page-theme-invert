@@ -4,6 +4,17 @@
   "name": "Theme Invert",
   "version": "1.0.0",
   "description": "Invert page colors per domain.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "theme-invert@heyoboo.invalid",
+      "update_url": "https://github.com/heyoboo/page-theme-invert",
+      "data_collection_permissions": {
+        "required": [
+          "browsingActivity"
+        ]
+      }
+    }
+  },
 
   "permissions": [
     "storage",
